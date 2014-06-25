@@ -1,11 +1,11 @@
 module Main where
 
 
-import qualified Data.Map as Map
+import qualified Data.Map as M
 import System.Environment (getArgs)
 import Data.List (sortBy)
 
-data Trie = Node (Map.Map Char Trie) deriving Show
+data Trie = Node (M.Map Char Trie) deriving Show
 
 main :: IO()
 main = do
@@ -33,7 +33,7 @@ trie = do
   args <- getArgs
   file <- readFile (args!!1)
   putStrLn $ "Trie " ++ (args!!1) ++ "."
-  putStrLn $ show {-$ Map.size-} $ getMap $ makeTrie $ lines file
+  putStrLn $ show {-$ M.size-} $ getMap $ makeTrie $ lines file
       where getMap (Node m) = m
 
 minedit :: IO()
@@ -71,14 +71,17 @@ correctWords w0 r0 t0 = do
 
 correctWord :: String -> Int ->  Trie -> IO()
 correctWord s0 r0 t0 = do
-  putStrLn $ messCorrPoss r0 s0 l0
-    where l0 = (findNeighbourhood r0 s0 t0)
+  messCorrPoss r0 s0 l0
+    where l0 = findNeighbourhood r0 s0 t0
 
-messCorrPoss :: Int -> String -> [(String,Int)] -> String
-messCorrPoss r0 s0 [] = "The word '" ++ s0 ++ "' you typed is most likely incorrect or not known to me. If it is incorrect there are >"++(show r0) ++ " mistakes in it." -- first case --- no correction possible since out of threshold
-messCorrPoss r0 s0 ((_,0):ls) = ""
-messCorrPoss r0 s0 l0 = "My suggestions are" ++ unwords (map fst l0)
- 
+messCorrPoss :: Int -> String -> M.Map Int [String] -> IO()
+messCorrPoss r0 s0 m0 =
+  case M.size m0 of
+    0 -> putStrLn $ "The word '" ++ s0 ++ "' you typed is most likely incorrect or not known to me. If it is incorrect there are >"++(show r0) ++ " mistakes in it." ++ "\n" -- first case --- no correction possible since out of threshold
+    _ -> if M.member 0 m0
+                 then return ()
+                 else putStrLn $ "My suggestions are: " ++ unwords (M.foldr' (++) [] m0) ++ "\n"
+
   
 cmdArgs :: IO()
 cmdArgs = do
@@ -86,33 +89,35 @@ cmdArgs = do
   putStr $ show args
 
 addToTrie :: String -> Trie -> Trie
-addToTrie ""      (Node m) = Node (Map.insert endChar (Node Map.empty) m)
+addToTrie ""      (Node m) = Node (M.insert endChar (Node M.empty) m)
 
 addToTrie (c : s) (Node m) = t'
   where
-    t' = if Map.member c m
-         then Node (Map.adjust (const (addToTrie s (m Map.! c))) c m) 
-         else Node (Map.insert c (addToTrie s (Node Map.empty)) m)
+    t' = if M.member c m
+         then Node (M.adjust (const (addToTrie s (m M.! c))) c m) 
+         else Node (M.insert c (addToTrie s (Node M.empty)) m)
       
 makeTrie :: [String] -> Trie
-makeTrie ss = foldr addToTrie (Node Map.empty) ss
+makeTrie ss = foldr addToTrie (Node M.empty) ss
 
 -- operations to do to get from string in list to s0
 -- first is radius
-findNeighbourhood :: Int -> String -> Trie -> [(String,Int)]
-findNeighbourhood r0 s0 t0 = sortBy (\a b -> if snd a < snd b then LT else if snd a == snd b then EQ else GT) (findNeighbourhood' r0 "" t0 (zip ('#':s0) [0..length s0])) 
-  where -- first : current string, second : length of current string, third : assoc list with substrings (chars) and min edt dists 
-    findNeighbourhood' :: Int -> String -> Trie -> [(Char, Int)] -> [(String, Int)]
-    findNeighbourhood' r1 s1 (Node m0) ci0 = Map.foldr' (++) [] (Map.mapWithKey go m0)
+findNeighbourhood :: Int -> String -> Trie -> M.Map Int [String]
+findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 (zip ('#':s0) [0..length s0]) 
+  where -- first : current string,
+    -- second : length of current string,
+    -- third : assoc list with substrings (chars) and min edt dists 
+    findNeighbourhood' :: Int -> String -> Trie -> [(Char,Int)] -> M.Map Int [String]
+    findNeighbourhood' r1 s1 (Node m0) ci0 = M.foldr' (M.unionWith (++)) M.empty (M.mapWithKey go m0)
       where
-        go :: Char -> Trie -> [(String,Int)] -- recursion function
+        go :: Char -> Trie -> M.Map Int [String] -- recursion function
         go '_' _ = if d0 > r1 then
-                     [] -- return nothing (matching is out of threshold r1)
+                     M.empty -- return nothing (matching is out of threshold r1)
                    else
-                     [(s1,snd (last ci0))] -- return current string with minimum edit distance ('_' is endChar)
+                     M.singleton (snd (last ci0)) [s1] -- return current string with minimum edit distance ('_' is endChar)
           where d0 = snd (last ci0) -- current minimum edit distance
         go c0 t1 = if h0>r1 then
-                     []
+                     M.empty
                    else
                       findNeighbourhood' r1 (s1++[c0]) t1 ci1
           where (h0,ci1) = update (0,ci0) -- updated assoc list
