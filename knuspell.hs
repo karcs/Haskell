@@ -56,6 +56,8 @@ correctText = do
   args <- getArgs
   dict <- readFile (args !! 1)
   text <- readFile (args !! 2)
+  putStrLn "You want me to correct the following text:"
+  putStrLn text
   let rad = read (args !! 3) :: Int
       tree = makeTrie $ lines dict
   correctWords (words text) rad tree 
