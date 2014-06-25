@@ -3,6 +3,7 @@ module Main where
 
 import qualified Data.Map as Map
 import System.Environment (getArgs)
+import Data.List (sortBy)
 
 data Trie = Node (Map.Map Char Trie) deriving Show
 
@@ -16,6 +17,7 @@ main = do
     ("minEdit" : _) -> minedit
     ("minEdits": _) -> minedits 
     ("cmdArgs" : _) -> cmdArgs
+    ("corrText":_) -> correctText
     _ -> error "Sorry, I do not understand."
 
 hello :: IO()
@@ -49,7 +51,33 @@ minedits = do
   text <- readFile (args !! 2)
   putStrLn $ show $ map ((flip (findNeighbourhood 4)) (makeTrie $ lines dict)) (lines text) 
 
+correctText :: IO()            
+correctText = do
+  args <- getArgs
+  dict <- readFile (args !! 1)
+  text <- readFile (args !! 2)
+  let rad = read (args !! 3) :: Int
+      tree = makeTrie $ lines dict
+  correctWords (words text) rad tree 
 
+               
+correctWords :: [String] -> Int -> Trie -> IO()
+correctWords w0 r0 t0 = do
+  case w0 of
+    [] -> return ()
+    (w1:w1s) -> correctWord w1 r0 t0 >> correctWords w1s r0 t0
+
+correctWord :: String -> Int ->  Trie -> IO()
+correctWord s0 r0 t0 = do
+  putStrLn $ messCorrPoss r0 s0 l0
+    where l0 = (findNeighbourhood r0 s0 t0)
+
+messCorrPoss :: Int -> String -> [(String,Int)] -> String
+messCorrPoss r0 s0 [] = "The word '" ++ s0 ++ "' you typed is most likely incorrect or not known to me. If it is incorrect there are >"++(show r0) ++ " mistakes in it." -- first case --- no correction possible since out of threshold
+messCorrPoss r0 s0 ((_,0):ls) = ""
+messCorrPoss r0 s0 l0 = "My suggestions are" ++ unwords (map fst l0)
+ 
+  
 cmdArgs :: IO()
 cmdArgs = do
   args <- getArgs
@@ -70,30 +98,33 @@ makeTrie ss = foldr addToTrie (Node Map.empty) ss
 -- operations to do to get from string in list to s0
 -- first is radius
 findNeighbourhood :: Int -> String -> Trie -> [(String,Int)]
-findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 (zip ('#':s0) [0..length s0]) 
+findNeighbourhood r0 s0 t0 = sortBy (\a b -> if snd a < snd b then LT else if snd a == snd b then EQ else GT) (findNeighbourhood' r0 "" t0 (zip ('#':s0) [0..length s0])) 
   where -- first : current string, second : length of current string, third : assoc list with substrings (chars) and min edt dists 
     findNeighbourhood' :: Int -> String -> Trie -> [(Char, Int)] -> [(String, Int)]
-    findNeighbourhood' r1 s1 (Node m0) ci0 = Map.fold (++) [] (Map.mapWithKey go m0)
+    findNeighbourhood' r1 s1 (Node m0) ci0 = Map.foldr' (++) [] (Map.mapWithKey go m0)
       where
         go :: Char -> Trie -> [(String,Int)] -- recursion function
         go '_' _ = if d0 > r1 then
-                       [] -- return nothing (matching is out of threshold r1)
-                     else
-                       [(s1,snd (last ci0))] -- return current string with minimum edit distance ('_' is endChar)
+                     [] -- return nothing (matching is out of threshold r1)
+                   else
+                     [(s1,snd (last ci0))] -- return current string with minimum edit distance ('_' is endChar)
           where d0 = snd (last ci0) -- current minimum edit distance
-        go c0 t1 = if minimum (map snd ci0) >= r1 then
-                      []
+        go c0 t1 = if h0>r1 then
+                     []
                    else
                       findNeighbourhood' r1 (s1++[c0]) t1 ci1
-          where ci1 = update ci0 -- updated assoc list
-                update :: [(Char,Int)] -> [(Char,Int)]
+          where (h0,ci1) = update (0,ci0) -- updated assoc list
+                update :: (Int,[(Char,Int)]) -> (Int,[(Char,Int)])
                 update = update' 0 0
-                update' :: Int -> Int -> [(Char,Int)] -> [(Char,Int)] -- 
-                update' _ _ (('#', i1) : ci2) = ('#', i2) : (update' i1 i2 ci2) -- first to ints store the values needed for the sub and ins case in the next iteration 
-                  where i2 = i1 + delcost c0 --correct
-                update' j0 j1 ((c1,i1) : ci2) = (c1,i2) : (update' i1 i2 ci2)
+                update' :: Int -> Int -> (Int,[(Char,Int)]) -> (Int,[(Char,Int)]) -- first is heuristic min edt dist (h)
+                update' _ _ (_,(('#', i1) : ci2)) = (min i2 (fst ici0),('#', i2) : snd ici0) -- first to ints store the values needed for the sub and ins case in the next iteration 
+                  where i2 = i1 + delcost c0
+                        ici0 = update' i1 i2 (i2,ci2) -- rest of the 'list'
+                update' j0 j1 (h1,((c1,i1) : ci2)) = (min h2 (fst ici0),(c1,i2) : snd ici0)
                   where i2 = minimum [ i1 + delcost c0, j0 + subcost c0 c1, j1 + inscost c1 ]   -- newly defined distance
-                update' _ _ ci2 = ci2
+                        ici0 = update' i1 i2 (h2,ci2)
+                        h2 = min h1 i2
+                update' _ _ (h1,[]) = (h1,[])
     
 endChar :: Char
 endChar = '_'
@@ -110,20 +141,6 @@ subcost c1 c2 = if c1 == c2 then 0 else 1
 inscost :: Char -> Int
 inscost _ = 1
 
-        --Name subject to change
---update :: Char -> [(Char, Int)] -> [(Char, Int)]
---update c ci = update' 0 c ci
---update' :: Int -> Char -> [(Char, Int)] -> [(Char, Int)]
---update' q c ((c1, i1) : (c2, i2) : cis)  = ((c1, i1') : (update' i1' c ((c2, i2) : cis)))
---  where
---    i1' = if c1 == startChar
---         then 0
---         else minimum
---              [ (delcost c1) + q
---              , (subcost c1 c) + i1
---              , (inscost c2) + i2 ]
---update' _ _ _ = []
-          
 
 -- diff :: Eq a => [a] -> [a] -> (Int, [Edit a])
 -- diff s t = (cost, reverse edits) -- edits are build back to front... so they need to be reversed
