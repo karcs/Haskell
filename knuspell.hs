@@ -14,6 +14,7 @@ main = do
     ["lineRev"] -> lineRev
     ("trieTest" : _) -> trie -- Just reads the contents of given file and converts it to a trie.
     ("minEdit" : _) -> minedit
+    ("minEdits": _) -> minedits 
     ("cmdArgs" : _) -> cmdArgs
     _ -> error "Sorry, I do not understand."
 
@@ -30,27 +31,32 @@ trie = do
   args <- getArgs
   file <- readFile (args!!1)
   putStrLn $ "Trie " ++ (args!!1) ++ "."
-  putStrLn $ show $ Map.size $ getMap $ makeTrie $ lines file
+  putStrLn $ show {-$ Map.size-} $ getMap $ makeTrie $ lines file
       where getMap (Node m) = m
 
 minedit :: IO()
 minedit = do
   args <- getArgs
   file <- readFile (args!!1)
-  putStrLn $ show $ (map fst (findNeighbourhood (args !! 2) (makeTrie $ lines file)))
+  let rad = read (args !! 3) :: Int
+      word = args !! 2
+  putStrLn $ show $ findNeighbourhood rad word (makeTrie $ lines file)
+
+minedits :: IO()
+minedits = do
+  args <- getArgs
+  dict <- readFile (args !! 1)
+  text <- readFile (args !! 2)
+  putStrLn $ show $ map ((flip (findNeighbourhood 4)) (makeTrie $ lines dict)) (lines text) 
+
 
 cmdArgs :: IO()
 cmdArgs = do
   args <- getArgs
   putStr $ show args
 
-
-
 addToTrie :: String -> Trie -> Trie
 addToTrie ""      (Node m) = Node (Map.insert endChar (Node Map.empty) m)
-  where
-    endChar :: Char
-    endChar = '_'
 
 addToTrie (c : s) (Node m) = t'
   where
@@ -61,30 +67,63 @@ addToTrie (c : s) (Node m) = t'
 makeTrie :: [String] -> Trie
 makeTrie ss = foldr addToTrie (Node Map.empty) ss
 
-findNeighbourhood :: String -> Trie -> [(String,Int)]
-findNeighbourhood s t = findNeighbourhood' "#" t (zip ('#':s) [0..length s]) 
-  where
-    findNeighbourhood' :: String ->  Trie -> [(Char, Int)] -> [(String, Int)]
-    findNeighbourhood' s (Node m) si = Map.fold (++) [] (Map.mapWithKey (\c t -> findNeighbourhood' (s ++ [c]) t (update c si)) m)
+-- operations to do to get from string in list to s0
+-- first is radius
+findNeighbourhood :: Int -> String -> Trie -> [(String,Int)]
+findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 (zip ('#':s0) [0..length s0]) 
+  where -- first : current string, second : length of current string, third : assoc list with substrings (chars) and min edt dists 
+    findNeighbourhood' :: Int -> String -> Trie -> [(Char, Int)] -> [(String, Int)]
+    findNeighbourhood' r1 s1 (Node m0) ci0 = Map.fold (++) [] (Map.mapWithKey go m0)
+      where
+        go :: Char -> Trie -> [(String,Int)] -- recursion function
+        go '_' _ = if d0 > r1 then
+                       [] -- return nothing (matching is out of threshold r1)
+                     else
+                       [(s1,snd (last ci0))] -- return current string with minimum edit distance ('_' is endChar)
+          where d0 = snd (last ci0) -- current minimum edit distance
+        go c0 t1 = if minimum (map snd ci0) >= r1 then
+                      []
+                   else
+                      findNeighbourhood' r1 (s1++[c0]) t1 ci1
+          where ci1 = update ci0 -- updated assoc list
+                update :: [(Char,Int)] -> [(Char,Int)]
+                update = update' 0 0
+                update' :: Int -> Int -> [(Char,Int)] -> [(Char,Int)] -- 
+                update' _ _ (('#', i1) : ci2) = ('#', i2) : (update' i1 i2 ci2) -- first to ints store the values needed for the sub and ins case in the next iteration 
+                  where i2 = i1 + delcost c0 --correct
+                update' j0 j1 ((c1,i1) : ci2) = (c1,i2) : (update' i1 i2 ci2)
+                  where i2 = minimum [ i1 + delcost c0, j0 + subcost c0 c1, j1 + inscost c1 ]   -- newly defined distance
+                update' _ _ ci2 = ci2
+    
+endChar :: Char
+endChar = '_'
+
+startChar :: Char
+startChar = '#'
+
+delcost :: Char -> Int
+delcost _ = 1
+
+subcost :: Char -> Char -> Int
+subcost c1 c2 = if c1 == c2 then 0 else 1
+
+inscost :: Char -> Int
+inscost _ = 1
 
         --Name subject to change
-update :: Char -> [(Char, Int)] -> [(Char, Int)]
-update c ((n, i) : si) = update' 0 c si
-update' :: Int -> Char -> [(Char, Int)] -> [(Char, Int)]
-update' q c ((n, i) : (n2, i2) : si)  = ((n, i') : (update' i' c ((n2, i2) : si)))
-  where
-    i' = if n == '#'
-         then 0
-         else minimum
-              [ (delcost n) + q
-              , (subcost n c) + i
-              , (inscost n2) + i2 ]
-update' _ _ _ = []
-
-delcost _ = 1
-subcost c1 c2 = if c1 == c2 then 0 else 1
-inscost _ = 1
-            
+--update :: Char -> [(Char, Int)] -> [(Char, Int)]
+--update c ci = update' 0 c ci
+--update' :: Int -> Char -> [(Char, Int)] -> [(Char, Int)]
+--update' q c ((c1, i1) : (c2, i2) : cis)  = ((c1, i1') : (update' i1' c ((c2, i2) : cis)))
+--  where
+--    i1' = if c1 == startChar
+--         then 0
+--         else minimum
+--              [ (delcost c1) + q
+--              , (subcost c1 c) + i1
+--              , (inscost c2) + i2 ]
+--update' _ _ _ = []
+          
 
 -- diff :: Eq a => [a] -> [a] -> (Int, [Edit a])
 -- diff s t = (cost, reverse edits) -- edits are build back to front... so they need to be reversed
@@ -94,7 +133,7 @@ inscost _ = 1
 --       inscost      = 1                              -- cost for insertion
 --       delcost      = 1                              --          deletion
 --       subcost :: Eq a => a -> a -> Int              --          substitution (depending on the two letters)
---       subcost x y  = if x == y then 0 else n + m    -- if they differ choose a number larger then maximum possible
+--       subcost x y  = if x == y then 0 else n + m    -- if they differ choose a number larger then maximum poscible
       
 --       nm = (n + 1) * (m + 1) -- just an abbreviation for the next two definitions
 
@@ -112,12 +151,12 @@ inscost _ = 1
 -- 	  where 
 --             list = map (\(a, b) -> distance a b) listnm
 --             -- distance :: Int -> Int -> (Int, [Edit a])
---             -- Interestingly the program does not compile then provided the type above, since the function
+--             -- Interestingly the program does not compile then provided the type above, cince the function
 --             -- makes use of the parameters s and t. Is there a way to explicitly state the type description
 --             -- which depends on the type of the function, whose where clause the function is in?
 
 --             -- On to this function: It implements the min-edit-distance function/matrix pretty straightforward as
---             -- described in the paper/textbook. The difference is, that this version appends the used edit in front
+--             -- described in the paper/textbook. The difference is, that this vercion appends the used edit in front
 --             -- of an accumulating list of edits.
 --             distance 0 0 = (0, [])
 --             distance i 0 = (c + inscost, Insertion (t !! (i-1)) : ed)
