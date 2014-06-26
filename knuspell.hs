@@ -4,6 +4,8 @@ module Main where
 import qualified Data.Map as M
 import System.Environment (getArgs)
 import Data.List (sortBy)
+import Control.Monad.State
+--import Data.List.Ordered as O
 
 data Trie = Node (M.Map Char Trie) deriving Show
 
@@ -15,7 +17,8 @@ main = do
     ["lineRev"] -> lineRev
     ("trieTest" : _) -> trie -- Just reads the contents of given file and converts it to a trie.
     ("minEdit" : _) -> minedit
-    ("minEdits": _) -> minedits 
+    ("minEdits": _) -> minedits
+    ("findBest": _) -> findbest
     ("cmdArgs" : _) -> cmdArgs
     ("corrText":_) -> correctText
     _ -> error "Sorry, I do not understand."
@@ -50,6 +53,13 @@ minedits = do
   dict <- readFile (args !! 1)
   text <- readFile (args !! 2)
   putStrLn $ show $ map ((flip (findNeighbourhood 4)) (makeTrie $ lines dict)) (lines text) 
+
+findbest :: IO()
+findbest = do
+  args <- getArgs
+  dict <- readFile (args !! 1)
+  let s = args !! 2
+  putStrLn $ show $ findBest 10 s (makeTrie $ lines dict)
 
 correctText :: IO()            
 correctText = do
@@ -100,13 +110,88 @@ addToTrie (c : s) (Node m) = t'
 makeTrie :: [String] -> Trie
 makeTrie ss = foldr addToTrie (Node M.empty) ss
 
+trieToMap :: Trie -> M.Map Char Trie
+trieToMap (Node m) = m
+
+getTrie :: String -> Trie -> Trie
+getTrie [] t = t
+getTrie (s : ss) (Node m) = m M.! s 
+
+update :: Char -> (Int,[(Char,Int)]) -> (Int,[(Char,Int)])
+update c0 = update' 0 0
+    where
+      -- first is heuristic min edt dist (h)
+      -- first two ints store the values needed for the sub and ins case in the next iteration
+      update' :: Int -> Int -> (Int,[(Char,Int)]) -> (Int,[(Char,Int)]) 
+      update' _ _ (_,(('#', i1) : ci2)) = (min i2 (fst ici0),('#', i2) : snd ici0) 
+          where i2 = i1 + delcost c0
+                ici0 = update' i1 i2 (i2,ci2) -- rest of the 'list'
+      update' j0 j1 (h1,((c1,i1) : ci2)) = (min h2 (fst ici0),(c1,i2) : snd ici0)
+          where i2 = minimum [ i1 + delcost c0, j0 + subcost c0 c1, j1 + inscost c1 ]   -- newly defined distance
+                ici0 = update' i1 i2 (h2,ci2)
+                h2 = min h1 i2
+      update' _ _ (h1,[]) = (h1,[])       
+
+minEditDist :: [(Char, Int)] -> Int
+minEditDist [] = 9999
+minEditDist x  = snd $ last x
+
+insertBagBy :: (a -> a -> Ordering) -> a -> [a] -> [a]
+insertBagBy cmp = loop
+  where
+    loop x [] = [x]
+    loop x (y:ys)
+      = case cmp x y of
+         GT -> y:loop x ys
+         _  -> x:y:ys
+
+stringToCI :: String -> [(Char, Int)]
+stringToCI s = (zip s [0..length s])
+
+findBest :: Int -> String -> Trie -> [(Int, String)]
+findBest i s t = [(minEditDist ci, map fst ci) | ci <- result]
+    where
+      
+      result = evalState (findBest' i s) [([], t)] -- TODO: Something meaningful?!
+      findBest' :: Int -> String -> State [([(Char, Int)], Trie)] [[(Char, Int)]]
+      findBest' i s = do
+                     st <- get
+                     let
+                         he        = searchFirst st
+                         (hci, ht) = he
+                         newElems  = map (\(c, t) -> (snd $ update c (minEditDist hci, hci), t))  $ M.toList $ trieToMap ht 
+                         st'       = foldr (insertBagBy customOrder) st newElems
+                     put st'
+                     let
+                         thresInd  = (min i (length st)) - 1
+                         threshold = minEditDist $ fst $ (st !! thresInd)
+                     put $ takeWhile (\x ->  (minEditDist $ fst x) < threshold) st'
+                     if isComplete st'
+                     then return (take i (map fst st'))
+                     else findBest' i s
+          where
+            customOrder :: ([(Char, Int)], Trie) -> ([(Char, Int)], Trie) -> Ordering
+            customOrder x y = compare (minEditDist $ fst x) (minEditDist $ fst y)
+
+            -- finds the first element in the state, which is not fully expanded, and its index
+            searchFirst ((cis, Node m) : ss) =
+                if M.null m
+                then searchFirst ss 
+                else (cis, Node m)
+
+            isComplete :: [([(Char, Int)], Trie)] -> Bool
+            isComplete cit = and $ map (M.null . trieToMap . snd) cit
+                 
+
 -- operations to do to get from string in list to s0
 -- first is radius
 findNeighbourhood :: Int -> String -> Trie -> M.Map Int [String]
 findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 (zip ('#':s0) [0..length s0]) 
-  where -- first : current string,
-    -- second : length of current string,
-    -- third : assoc list with substrings (chars) and min edt dists 
+  where
+    -- first  : radius,
+    -- second : current string,
+    -- third  : length of current string,
+    -- forth  : assoc list with substrings (chars) and min edt dists 
     findNeighbourhood' :: Int -> String -> Trie -> [(Char,Int)] -> M.Map Int [String]
     findNeighbourhood' r1 s1 (Node m0) ci0 = M.foldr' (M.unionWith (++)) M.empty (M.mapWithKey go m0)
       where
@@ -120,18 +205,7 @@ findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 (zip ('#':s0) [0..lengt
                      M.empty
                    else
                       findNeighbourhood' r1 (s1++[c0]) t1 ci1
-          where (h0,ci1) = update (0,ci0) -- updated assoc list
-                update :: (Int,[(Char,Int)]) -> (Int,[(Char,Int)])
-                update = update' 0 0
-                update' :: Int -> Int -> (Int,[(Char,Int)]) -> (Int,[(Char,Int)]) -- first is heuristic min edt dist (h)
-                update' _ _ (_,(('#', i1) : ci2)) = (min i2 (fst ici0),('#', i2) : snd ici0) -- first to ints store the values needed for the sub and ins case in the next iteration 
-                  where i2 = i1 + delcost c0
-                        ici0 = update' i1 i2 (i2,ci2) -- rest of the 'list'
-                update' j0 j1 (h1,((c1,i1) : ci2)) = (min h2 (fst ici0),(c1,i2) : snd ici0)
-                  where i2 = minimum [ i1 + delcost c0, j0 + subcost c0 c1, j1 + inscost c1 ]   -- newly defined distance
-                        ici0 = update' i1 i2 (h2,ci2)
-                        h2 = min h1 i2
-                update' _ _ (h1,[]) = (h1,[])
+          where (h0,ci1) = update c0 (0,ci0) -- updated assoc list
     
 endChar :: Char
 endChar = '_'
