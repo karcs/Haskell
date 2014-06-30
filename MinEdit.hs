@@ -11,7 +11,7 @@ import Data.List (insertBy, partition)
 import Debug.Trace
 
 type CharInts = [(Char, Int)]
-type StateEntry = ((Int, Int, [(Char,CharInts)]), String, Trie)
+type StateEntry = ([(Char,CharInts)], String, Trie)
 type StateEntries = M.Map Int [StateEntry]
 
 
@@ -41,9 +41,9 @@ thd (a,b,c) = c
 ccisFromUpdate = thd
 
 -- update with one character the table (first int is current minimum edit distance, second is heuristic)
-update :: Char -> [(Char, CharInts)] -> (Int, Int, [(Char, CharInts)])
+update :: Char -> [(Char, CharInts)] -> (Int, [(Char, CharInts)])
 update c0 ccis0 = case ccis0 of
-  cci0 : cci1 : _ -> (med0, h0, take 2 ((c0, cis0):ccis0)) -- only the first two tables need to be memoized
+  cci0 : cci1 : _ -> (h0, take 2 ((c0, cis0):ccis0)) -- only the first two tables need to be memoized
     where (h0, cis0) = update' (0, 0, '#') (0 : 0 : map snd (snd cci1)) (0, snd cci0)
             where
               -- first is (subcost add, inscost add, last char)
@@ -56,8 +56,7 @@ update c0 ccis0 = case ccis0 of
                       ici0 = update' (i1, i2, d1) (tail is0) (h1, cis1)
                       h2 = min h1 i2
               update' _ _ (h1,[]) = (h1,[]) 
-          med0 = snd $ last cis0
-  cci0 : _ -> (med0, h0, (c0, cis0) : ccis0)
+  cci0 : _ -> (h0, (c0, cis0) : ccis0)
     where (h0, cis0) = update' (0,0) (0, snd cci0)
             where
               update' :: (Int, Int) -> (Int, CharInts) -> (Int, CharInts)
@@ -69,45 +68,44 @@ update c0 ccis0 = case ccis0 of
                       ici0 = update' (i1, i2) (h2,ci2)
                       h2 = min h1 i2
               update' _ (h1,[]) = (h1,[])
-          med0 = snd $ last cis0
   
 minEditDist :: CharInts -> Int
 minEditDist [] = bigNum
 minEditDist x  = snd $ last x
 
-readableEntry :: [StateEntry] -> [(Int, String)]
-readableEntry = map (\(i, s, _) -> (i, reverse s))
+--readableEntry :: [StateEntry] -> [(Int, String)]
+--readableEntry = map (\(i, s, _) -> (i, reverse s))
 
-stringToCI :: String -> [(Char, Int)]
-stringToCI s = (zip (startChar : s) [0..length s])
+stringToCI :: String -> [(Char,[(Char, Int)])]
+stringToCI s = [('#',(zip (startChar : s) [0..length s]))]
 
 mapKeysValuesWith :: Ord k2 => (b -> b -> b) -> ((k1, a) -> (k2, b)) -> M.Map k1 a -> M.Map k2 b
 mapKeysValuesWith c f = M.fromListWith c . M.foldrWithKey (\k x xs -> (f (k, x)) : xs) []
 
 expand :: StateEntry -> StateEntries
-expand (cis, s, Node m) = (mapKeysValuesWith (++) 
-                           (\(c, t) -> let (hi, cis') = (update c (0, cis)) in
-                                       (hi, [(cis', c : s, t)])) b)
+expand (ccis, s, Node m) = (mapKeysValuesWith (++) 
+                           (\(c, t) -> let (hi, ccis') = (update c ccis) in
+                                       (hi, [(ccis', c : s, t)])) b)
     where
       b = M.filterWithKey (\c _ -> c /= '_') m
 
 expandFirst :: StateEntries -> [(Int, String)]-> (StateEntries, [(Int, String)])
-expandFirst mes fes = -- trace (readableEntry mes ++ ";" ++ show fes)
-    --traceShow (map fst fes) $
-    (mes'', fes'') --trace ("New:   " ++ (show $ readableEntry newElems)) $ 
+expandFirst mse fse = -- trace (readableEntry mse ++ ";" ++ show fse)
+    --traceShow (map fst fse) $
+    (mse'', fse'') --trace ("New:   " ++ (show $ readableEntry newElems)) $ 
                                      -- mergeBy customOrder st' (sortBy customOrder newElems)
     where
      
-      ((cis, s, Node m), mes') = --trace (readableEntry mes) $
-                                 extractFirst mes
+      ((ccis, s, Node m), mse') = --trace (readableEntry mse) $
+                                 extractFirst mse
       a                        = M.lookup '_' m
       b                        = M.filterWithKey (\c _ -> c /= '_') m
       
-      fes'' = maybe fes (const $ tail $ insertBy customOrder (snd $ last cis, '_' : s) fes) a
-      mes''                    = --trace (readableEntry mes' ++ "---" ++ readableEntry blah
-                                 --                         ++ "---" ++ (readableEntry $ M.union mes' blah)) $
-                                 M.filter (not . null) (M.unionWith (++) mes' blah)
-                                  where blah = expand (cis, s, Node m)
+      fse'' = maybe fse (const $ tail $ insertBy customOrder (snd $ last $ snd $ head ccis, '_' : s) fse) a
+      mse''                    = --trace (readableEntry mse' ++ "---" ++ readableEntry blah
+                                 --                         ++ "---" ++ (readableEntry $ M.union mse' blah)) $
+                                 M.filter (not . null) (M.unionWith (++) mse' blah)
+                                  where blah = expand (ccis, s, Node m)
 
 
       --then ((snd (last hci), hci), c : ss, t)
@@ -142,37 +140,37 @@ findBest i s t = map (\(i, s) -> (i,  reverse $ tail s)) $ reverse result
      
       findBest' :: Int -> String -> State (StateEntries, [(Int, String)]) [(Int, String)]
       findBest' i s = do
-                     (se, fes) <- get
-                     let (se', fes') = expandFirst se fes
-                         se'' = M.filterWithKey (\k _ -> (<=) k $ fst $ head fes') se'
-                     put (se'', fes')
+                     (se, fse) <- get
+                     let (se', fse') = expandFirst se fse
+                         se'' = M.filterWithKey (\k _ -> (<=) k $ fst $ head fse') se'
+                     put (se'', fse')
                      if M.null se''
-                     then return fes'
+                     then return fse'
                      else findBest' i s
 
 
 -- operations to do to get from string in list to s0
 -- first is radius
 findNeighbourhood :: Int -> String -> Trie -> M.Map Int [String]
-findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 (zip ('#':s0) [0..length s0]) 
+findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 $ stringToCI s0 
   where
     -- first  : radius,
     -- second : current string,
     -- third  : length of current string,
     -- forth  : assoc list with substrings (chars) and min edt dists 
-    findNeighbourhood' :: Int -> String -> Trie -> [(Char,Int)] -> M.Map Int [String]
+    findNeighbourhood' :: Int -> String -> Trie -> [(Char, CharInts)] -> M.Map Int [String]
     findNeighbourhood' r1 s1 (Node m0) ci0 = M.foldr' (M.unionWith (++)) M.empty (M.mapWithKey go m0)
       where
         go :: Char -> Trie -> M.Map Int [String] -- recursion function
         go '_' _ = if d0 > r1 then
                      M.empty -- return nothing (matching is out of threshold r1)
                    else
-                     M.singleton (snd (last ci0)) [s1] -- return current string with minimum edit distance ('_' is endChar)
-          where d0 = snd (last ci0) -- current minimum edit distance
+                     M.singleton (snd $ last $ snd $ head ci0) [s1] -- return current string with minimum edit distance ('_' is endChar)
+          where d0 = snd $ last $ snd $ head ci0 -- current minimum edit distance
         go c0 t1 = if h0>r1 then
                      M.empty
                    else
                       findNeighbourhood' r1 (s1++[c0]) t1 ci1
-          where (h0,ci1) = update c0 (0,ci0) -- updated assoc list
+          where (h0,ci1) = update c0 ci0 -- updated assoc list
     
 
