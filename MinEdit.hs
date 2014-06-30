@@ -13,7 +13,7 @@ import Data.Maybe (fromJust, maybe)
 import Debug.Trace
 
 type CharInts = [(Char, Int)]
-type StateEntry = ((Int, CharInts), String, Trie)
+type StateEntry = ((Int, Int, [(Char,CharInts)]), String, Trie)
 
 bigNum :: Int
 bigNum = 9999
@@ -27,27 +27,56 @@ subcost c1 c2 = if c1 == c2 then 0 else 1
 inscost :: Char -> Int
 inscost _ = 1
 
-update :: Char -> (Int, CharInts) -> (Int, CharInts)
-update c0 = update' 0 0
-    where
-      -- first two ints store the values needed for the sub and ins case in the next iteration
-      -- first entry of the pair is heuristic min edit dist (h)
-      update' :: Int -> Int -> (Int, CharInts) -> (Int, CharInts) 
-      update' _ _ (_,(('#', i1) : ci2)) = (min i2 (fst ici0),(startChar, i2) : snd ici0) 
-          where i2 = i1 + delcost c0
-                ici0 = update' i1 i2 (i2,ci2) -- rest of the 'list'
-      update' j0 j1 (h1,((c1,i1) : ci2)) = (min h2 (fst ici0),(c1,i2) : snd ici0)
-          where i2 = minimum [ i1 + delcost c0, j0 + subcost c0 c1, j1 + inscost c1 ]   -- newly defined distance
-                ici0 = update' i1 i2 (h2,ci2)
-                h2 = min h1 i2
-      update' _ _ (h1,[]) = (h1,[])       
+swapcost :: (Char,Char) -> (Char,Char) -> Int
+swapcost (c0,c1) (d0,d1) = if c0 == d1 && d0==c1 && c0 /= '#' && c1 /= '#' && d0 /= '#' && c1 /= '#' then
+                             if c0 == d0 then 0
+                             else 1
+                           else
+                             bigNum
 
+medFromUpdate = fst
+heuFromUpdate = snd
+thd :: (a,b,c) -> c
+thd (a,b,c) = c
+ccisFromUpdate = thd
+
+-- update with one character the table (first int is current minimum edit distance, second is heuristic)
+update :: Char -> [(Char, CharInts)] -> (Int, Int, [(Char, CharInts)])
+update c0 ccis0 = case ccis0 of
+  cci0 : cci1 : _ -> (med0, h0, take 2 ((c0, cis0):ccis0)) -- only the first two tables need to be memoized
+    where (h0, cis0) = update' (0, 0, '#') (0 : 0 : map snd (snd cci1)) (0, snd cci0)
+            where
+              -- first is (subcost add, inscost add, last char)
+              update' :: (Int, Int, Char) -> [Int] -> (Int,CharInts) -> (Int,CharInts)
+              update' _ is0 (_, ('#', i0) : cis1) = (min i1 (fst ici0), ('#', i1) : snd ici0)
+                where i1 = i0 + delcost c0
+                      ici0 = update' (i0, i1, '#') (tail is0) (i1, cis1)
+              update' (j0, j1, d0) is0 (h1, (d1, i1) : cis1) = (min h2 (fst ici0), (d1, i2) : snd ici0)
+                where i2 = minimum [ i1 + delcost c0, j0 + subcost c0 d1, j1 + inscost d1, swapcost (fst cci1, fst cci0) (d0, d1) + head is0 ]
+                      ici0 = update' (i1, i2, d1) (tail is0) (h1, cis1)
+                      h2 = min h1 i2
+              update' _ _ (h1,[]) = (h1,[]) 
+          med0 = snd $ last cis0
+  cci0 : _ -> (med0, h0, (c0, cis0) : ccis0)
+    where (h0, cis0) = update' (0,0) (0, snd cci0)
+            where
+              update' :: (Int, Int) -> (Int, CharInts) -> (Int, CharInts)
+              update' _ (_,(('#', i1) : ci2)) = (min i2 (fst ici0),(startChar, i2) : snd ici0)
+                where i2 = i1 + delcost c0
+                      ici0 = update' (i1, i2) (i2,ci2) -- rest of the 'list'
+              update' (j0, j1) (h1,((c1,i1) : ci2)) = (min h2 (fst ici0),(c1,i2) : snd ici0)
+                where i2 = minimum [ i1 + delcost c0, j0 + subcost c0 c1, j1 + inscost c1 ] -- newly defined distance
+                      ici0 = update' (i1, i2) (h2,ci2)
+                      h2 = min h1 i2
+              update' _ (h1,[]) = (h1,[])
+          med0 = snd $ last cis0
+  
 minEditDist :: CharInts -> Int
 minEditDist [] = bigNum
 minEditDist x  = snd $ last x
 
 readableEntry :: [StateEntry] -> [(Int, String)]
-readableEntry = map (\((i, _), s, _) -> (i, reverse s))
+readableEntry = map (\(i, s, _) -> (i, reverse s))
 
 stringToCI :: String -> [(Char, Int)]
 stringToCI s = (zip (startChar : s) [0..length s])
