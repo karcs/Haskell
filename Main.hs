@@ -7,6 +7,7 @@ import System.Environment (getArgs)
 import System.Console.ANSI
 import Data.List
 import Data.Char (ord)
+import Debug.Trace
 import qualified Data.Map as M
 
 
@@ -14,22 +15,14 @@ main :: IO()
 main = do
   args <- getArgs
   case args of
-    ["trieTest", _]          -> trie        -- Just reads the contents of given file and converts it to a trie.
-    ("minEdit"  : _ : _ : _) -> minedit     -- Gives correction proposals within a given distance. 
-    ("minEdits" : _ : _ : _) -> minedits    -- Gives correction proposals within a given distance for a whole text.
-    ("findBest" : _ : _ : _) -> findbest    -- Gives the n nearst proposals to a given word.
-    ("help"     : _        ) -> help        -- Print help.
-    ("corrText" : _ : _    ) -> correctText
+    ["--minEdit" , _, _, _] -> minedit     -- Gives correction proposals within a given distance. 
+    ["--minEdits", _, _, _] -> minedits    -- Gives correction proposals within a given distance for a whole text.
+    ["--findBest", _, _, _] -> findbest    -- Gives the n nearst proposals to a given word.
+    ["--help"             ] -> help        -- Print help.
+    ["--corrText", _, _   ] -> correctText -- Corrects the given file "text" and writes in "corrected_text" all changes made.
+    ["--dumbCorr", _, _   ] -> useBest     -- Corrects the given file "text" by choosing the best proposal.
+    ["--showWrong",   _, _] -> showWrong   -- Shows all words not contained in the dictionary.
     _ -> error "Sorry, I do not understand."
-
-
-trie :: IO()
-trie = do
-  args <- getArgs
-  file <- readFile (args!!1)
-  putStrLn $ "Trie " ++ (args!!1) ++ "."
-  putStrLn $ show {-$ M.size-} $ getMap $ makeTrie $ lines file
-      where getMap (Node m) = m
 
 minedit :: IO()
 minedit = do
@@ -60,16 +53,16 @@ correctText = do
   text <- readFile (args !! 2)
   let t                 = makeTrie $ lines dict
       wordList          = words text
-  h <- openFile ((args !! 2) ++ ".bak") WriteMode
-  correctWords h wordList t
-  where
-    correctWords :: Handle -> [String] -> Trie -> IO ()
-    correctWords h []       t = do
-                hFlush h
-                hClose h
-                return ()
-    correctWords h (w : ws) t  = do
-                if null $ M.foldr' (++) [] $ findNeighbourhood 0 w t
+ 
+  corrWords <- correctWords wordList t
+  writeFile ("corrected_" ++ (args !! 2)) corrWords
+  clearScreen
+    where
+      correctWords :: [String] -> Trie -> IO String
+      correctWords [] _ = do
+                return []
+      correctWords (w : ws) t  = do
+                if M.null $ findNeighbourhood 0 w t
                 then do
                   clearScreen
                   hSetBuffering stdin NoBuffering
@@ -86,44 +79,56 @@ correctText = do
                   c <- getChar
                   if ord c >= 49 && ord c < 49 + length prop
                   then do
-                    hPutStr h $ (' ' : snd (prop !! (ord c - 49)))
-                    correctWords h ws t
-                  else correctWords h (w:ws) t
+                    a <- correctWords ws t
+                    return $ (++) (' ' : (snd (prop !! (ord c - 49)))) $ a
+                  else correctWords (w:ws) t
                 else do
-                    hPutStr h (' ' : w)
-                    correctWords h ws t
-                                 
+                    a <- correctWords ws t
+                    return (' ' : w ++ a)
 
-  
--- correctText :: IO()            
--- correctText = do
---   args <- getArgs
---   dict <- readFile (args !! 1)
---   text <- readFile (args !! 2)
---   putStrLn "You want me to correct the following text:"
---   putStrLn text
---   let rad = read (args !! 3) :: Int
---       tree = makeTrie $ lines dict
---   correctWords (words text) rad tree 
+useBest :: IO ()
+useBest = do 
+  args <- getArgs
+  dict <- readFile (args !! 1)
+  text <- readFile (args !! 2)
+  let t                 = makeTrie $ lines dict
+      wordList          = words text
+      corrWords = correctWords wordList t
+  writeFile ("corrected_" ++ (args !! 2)) corrWords
+    where
+      correctWords :: [String] -> Trie ->String
+      correctWords []      _ = []
+      correctWords (w: ws) t = traceShow (w, word) (' ' : word ++ (correctWords ws t))
+          where word = snd ((findBest 1 w t) !! 0)
 
-               
--- correctWords :: [String] -> Int -> Trie -> IO()
--- correctWords w0 r0 t0 = do
---   case w0 of
---     [] -> return ()
---     (w1:w1s) -> correctWord w1 r0 t0 >> correctWords w1s r0 t0
+showWrong :: IO ()
+showWrong = do
+  args <- getArgs
+  dict <- readFile (args !! 1)
+  text <- readFile (args !! 2)
+  let t                 = makeTrie $ lines dict
+      wordList          = words text
+  putStr $ wrongWords wordList t
+    where
+      wrongWords :: [String] -> Trie ->String
+      wrongWords []      _ = []
+      wrongWords (w: ws) t = (if M.null $ findNeighbourhood 2 w t
+                              then ' ' : w  
+                              else "") ++ (wrongWords ws t)
 
--- correctWord :: String -> Int ->  Trie -> IO()
--- correctWord s0 r0 t0 = do
---   messCorrPoss r0 s0 l0
---     where l0 = findNeighbourhood r0 s0 t0
-
--- messCorrPoss :: Int -> String -> M.Map Int [String] -> IO()
--- messCorrPoss r0 s0 m0 =
---   case M.size m0 of
---     0 -> putStrLn $ "The word '" ++ s0 ++ "' you typed is most likely incorrect or not known to me. If it is incorrect there are >"++(show r0) ++ " mistakes in it." ++ "\n" -- first case --- no correction possible since out of threshold
---     _ -> if M.member 0 m0
---                  then return ()
---                  else putStrLn $ "My suggestions are: " ++ unwords (M.foldr' (++) [] m0) ++ "\n"
 help :: IO ()
-help = undefined
+help = do
+  putStrLn ""
+  putStrLn "knuspell MODE dict [args]"
+  putStrLn ""
+  putStrLn "where MODE is one of the following and \"dict\" is the filename of dictionary to use:"
+  putStrLn "  --minEdit   Gives correction proposals for a given distance. args contains a single word and a distance (int)"
+  putStrLn "              Example: knuspell --minEdit dict.txt foo 3"
+  putStrLn "  --findBest  Lists the n nearest proposals to a given word. args contains a single word and the number of proposals"
+  putStrLn "              Example: knuspell --findBest dict.txt foo 3"
+  putStrLn "  --corrText  Corrects a given text in an interactive operating mode. args contains the name \"filename\" of a text file"
+  putStrLn "                   containing words to check. The changes made will be written \"corrected_filename\""
+  putStrLn ""
+  putStrLn "  --help      Shows this text. Ba dum tish."
+  putStrLn ""
+
