@@ -1,19 +1,19 @@
 module MinEdit
     ( findBest,
-      findNeighbourhood,
-      extractFirst
+      findNeighbourhood
     ) where
 
 import Trie
 import Control.Monad.State
 import qualified Data.Map as M
-import Data.List (sortBy, find)
-import Data.Maybe (fromJust, maybe)
-
+import Data.Maybe (maybe)
+import Data.List (insertBy, partition)
 import Debug.Trace
 
 type CharInts = [(Char, Int)]
 type StateEntry = ((Int, Int, [(Char,CharInts)]), String, Trie)
+type StateEntries = M.Map Int [StateEntry]
+
 
 bigNum :: Int
 bigNum = 9999
@@ -81,66 +81,74 @@ readableEntry = map (\(i, s, _) -> (i, reverse s))
 stringToCI :: String -> [(Char, Int)]
 stringToCI s = (zip (startChar : s) [0..length s])
 
-expandFirst :: [StateEntry] -> [StateEntry]
-expandFirst st = --trace ("New:   " ++ (show $ readableEntry newElems)) $ 
-                 mergeBy customOrder st' (sortBy customOrder newElems)
-    where
-      (((_, hci), ss, Node m), st') = extractFirst st
-      newElems     = map (\(c, t) -> if c == '_'
-                                     then ((snd (last hci), hci), c : ss, t)
-                                     else (update c (0, hci), c : ss, t)
-                                         )  $ M.toList m
+mapKeysValuesWith :: Ord k2 => (b -> b -> b) -> ((k1, a) -> (k2, b)) -> M.Map k1 a -> M.Map k2 b
+mapKeysValuesWith c f = M.fromListWith c . M.foldrWithKey (\k x xs -> (f (k, x)) : xs) []
 
-      customOrder :: StateEntry -> StateEntry -> Ordering
-      customOrder (x, _, _) (y, _, _) = compare (fst x) (fst y)
+expand :: StateEntry -> StateEntries
+expand (cis, s, Node m) = (mapKeysValuesWith (++) 
+                           (\(c, t) -> let (hi, cis') = (update c (0, cis)) in
+                                       (hi, [(cis', c : s, t)])) b)
+    where
+      b = M.filterWithKey (\c _ -> c /= '_') m
+
+expandFirst :: StateEntries -> [(Int, String)]-> (StateEntries, [(Int, String)])
+expandFirst mes fes = -- trace (readableEntry mes ++ ";" ++ show fes)
+    --traceShow (map fst fes) $
+    (mes'', fes'') --trace ("New:   " ++ (show $ readableEntry newElems)) $ 
+                                     -- mergeBy customOrder st' (sortBy customOrder newElems)
+    where
+     
+      ((cis, s, Node m), mes') = --trace (readableEntry mes) $
+                                 extractFirst mes
+      a                        = M.lookup '_' m
+      b                        = M.filterWithKey (\c _ -> c /= '_') m
+      
+      fes'' = maybe fes (const $ tail $ insertBy customOrder (snd $ last cis, '_' : s) fes) a
+      mes''                    = --trace (readableEntry mes' ++ "---" ++ readableEntry blah
+                                 --                         ++ "---" ++ (readableEntry $ M.union mes' blah)) $
+                                 M.filter (not . null) (M.unionWith (++) mes' blah)
+                                  where blah = expand (cis, s, Node m)
+
+
+      --then ((snd (last hci), hci), c : ss, t)
+      --else (update c (0, hci), c : ss, t)
+      
+      customOrder :: (Int, String) -> (Int, String) -> Ordering
+      customOrder x y = compare (fst y) (fst x)
+
+
 
       -- deliberately copied from the (experimental) Data.List.Ordered package.
-      mergeBy :: (a -> a -> Ordering) -> [a] -> [a] -> [a]
-      mergeBy cmp = loop
-          where
-            loop [] ys  = ys
-            loop xs []  = xs
-            loop (x:xs) (y:ys)
-                = case cmp x y of
-                    GT -> y : loop (x:xs) ys
-                    _  -> x : loop xs (y:ys)
+      -- mergeBy :: (a -> a -> Ordering) -> [a] -> [a] -> [a]
+      -- mergeBy cmp = loop
+      --     where
+      --       loop [] ys  = ys
+      --       loop xs []  = xs
+      --       loop (x:xs) (y:ys)
+      --           = case cmp x y of
+      --               GT -> y : loop (x:xs) ys
+      --               _  -> x : loop xs (y:ys)
 
-extractFirst :: [StateEntry] -> (StateEntry, [StateEntry])
-extractFirst ((cis, b, Node m) : ss) = extractFirst' (cis, b, Node m) ss
+extractFirst :: StateEntries -> (StateEntry, StateEntries)
+extractFirst mse = (se, mes')
     where
-      extractFirst' :: StateEntry -> [StateEntry] -> (StateEntry, [StateEntry])
-      extractFirst' (cis, ('_' : s), t) (c : ss) =
-          (rs, (cis, ('_' : s), t) : rss)
-              where (rs, rss) = extractFirst' c ss
-      extractFirst' (cis, s, t) ss =  ((cis, s, t), ss)
-          
-
+      mes' = M.adjust (const ses) k mse
+      Just (k, se : ses) = M.lookupGE 0 mse
 
 findBest :: Int -> String -> Trie -> [(Int, String)]
-findBest i s t = map (\(i, s) -> (i,  reverse $ tail s)) result
+findBest i s t = map (\(i, s) -> (i,  reverse $ tail s)) $ reverse result
     where
-      result = evalState (findBest' i s) [((0, stringToCI s), "", t)]
+      result = evalState (findBest' i s) (expand (stringToCI s, "", t), take i $ repeat (bigNum, "_"))
      
-      findBest' :: Int -> String -> State [StateEntry] [(Int, String)]
+      findBest' :: Int -> String -> State (StateEntries, [(Int, String)]) [(Int, String)]
       findBest' i s = do
-                     st <- get
-                     let st' = expandFirst st
-                     let
-                         hList     = take i $ filter (\(_, (s:_), _) -> s == '_') st'                     
-                         st''      = if null hList
-                                     then st'
-                                     else takeWhile (\((x, _), _, _) ->  (threshold >= x)) st'
-                                         where ((threshold, _), _, _) = last hList 
-                     put -- $ trace ("State: " ++ (show $ readableEntry st'')) $ 
-                         st''
-                     
-
-                     if isComplete st''
-                     then return (take i (map (\((k, _), x, _) -> (k, x)) st''))
+                     (se, fes) <- get
+                     let (se', fes') = expandFirst se fes
+                         se'' = M.filterWithKey (\k _ -> (<=) k $ fst $ head fes') se'
+                     put (se'', fes')
+                     if M.null se''
+                     then return fes'
                      else findBest' i s
-          where
-            isComplete :: [StateEntry] -> Bool
-            isComplete cit = and $ map (\(_, (s:_), _) -> s == '_') cit
 
 
 -- operations to do to get from string in list to s0
