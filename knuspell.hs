@@ -1,3 +1,4 @@
+-- | Main module, contains all things IO.
 module Main where
 
 import Trie
@@ -7,38 +8,32 @@ import System.Environment (getArgs)
 import System.Console.ANSI
 import Data.List
 import Data.Char (ord)
-import Debug.Trace
 import qualified Data.Map as M
 
-
+-- | Entry point of the program.
 main :: IO()
 main = do
   args <- getArgs
   case args of
-    ["--minEdit" , _, _, _] -> minedit     -- Gives correction proposals within a given distance. 
-    ["--minEdits", _, _, _] -> minedits    -- Gives correction proposals within a given distance for a whole text.
-    ["--findBest", _, _, _] -> findbest    -- Gives the n nearst proposals to a given word.
-    ["--help"             ] -> help        -- Print help.
-    ["--corrText", _, _   ] -> correctText -- Corrects the given file "text" and writes in "corrected_text" all changes made.
-    ["--dumbCorr", _, _   ] -> useBest     -- Corrects the given file "text" by choosing the best proposal.
-    ["--showWrong",   _, _] -> showWrong   -- Shows all words not contained in the dictionary.
+    ["--findWithin" , _, _, _] -> findWithin  -- Gives correction proposals within a given distance. 
+    ["--findBest"   , _, _, _] -> findbest    -- Gives the n nearst proposals to a given word.
+    ["--help"                ] -> help        -- Print help.
+    ["--corrText"   , _, _   ] -> correctText -- Corrects the given file "text" and writes in "corrected_text" all changes made.
+    ["--dumbCorr"   , _, _   ] -> dumbCorr    -- Corrects the given file "text" by choosing the best proposal.
+    ["--showWrong"  , _, _   ] -> showWrong   -- Shows all words not contained in the dictionary.
     _ -> error "Sorry, I do not understand."
 
-minedit :: IO()
-minedit = do
+
+-- | Gives correction proposals within a given distance. 
+findWithin :: IO()
+findWithin = do
   args <- getArgs
   file <- readFile (args!!1)
   let rad = read (args !! 3) :: Int
       word = args !! 2
   putStrLn $ show $ findNeighbourhood rad word (makeTrie $ lines file)
 
-minedits :: IO()
-minedits = do
-  args <- getArgs
-  dict <- readFile (args !! 1)
-  text <- readFile (args !! 2)
-  putStrLn $ show $ map ((flip (findNeighbourhood 4)) (makeTrie $ lines dict)) (lines text) 
-
+-- | Gives the n nearst proposals to a given word.
 findbest :: IO()
 findbest = do
   args <- getArgs
@@ -46,6 +41,7 @@ findbest = do
   let s = args !! 2
   putStrLn $ show $ findBest (read (args !! 3) :: Int) s (makeTrie $ lines dict)
 
+-- | Corrects the given file "text" and writes in "corrected_text" all changes made.
 correctText :: IO ()
 correctText = do
   args <- getArgs
@@ -86,8 +82,9 @@ correctText = do
                     a <- correctWords ws t
                     return (' ' : w ++ a)
 
-useBest :: IO ()
-useBest = do 
+-- | Corrects the given file "text" by choosing the best proposal.
+dumbCorr :: IO ()
+dumbCorr = do 
   args <- getArgs
   dict <- readFile (args !! 1)
   text <- readFile (args !! 2)
@@ -98,9 +95,10 @@ useBest = do
     where
       correctWords :: [String] -> Trie ->String
       correctWords []      _ = []
-      correctWords (w: ws) t = traceShow (w, word) (' ' : word ++ (correctWords ws t))
+      correctWords (w: ws) t = (' ' : word ++ (correctWords ws t))
           where word = snd ((findBest 1 w t) !! 0)
 
+-- | Shows all words not contained in the dictionary.
 showWrong :: IO ()
 showWrong = do
   args <- getArgs
@@ -115,20 +113,25 @@ showWrong = do
       wrongWords (w: ws) t = (if M.null $ findNeighbourhood 2 w t
                               then ' ' : w  
                               else "") ++ (wrongWords ws t)
-
+-- | Print help.
 help :: IO ()
 help = do
   putStrLn ""
   putStrLn "knuspell MODE dict [args]"
   putStrLn ""
-  putStrLn "where MODE is one of the following and \"dict\" is the filename of dictionary to use:"
-  putStrLn "  --minEdit   Gives correction proposals for a given distance. args contains a single word and a distance (int)"
-  putStrLn "              Example: knuspell --minEdit dict.txt foo 3"
-  putStrLn "  --findBest  Lists the n nearest proposals to a given word. args contains a single word and the number of proposals"
-  putStrLn "              Example: knuspell --findBest dict.txt foo 3"
-  putStrLn "  --corrText  Corrects a given text in an interactive operating mode. args contains the name \"filename\" of a text file"
-  putStrLn "                   containing words to check. The changes made will be written \"corrected_filename\""
+  putStrLn "where MODE is one of the following and \"dict\" is the filename of dictionary to use. The dictionary has to be"
+  putStrLn "a newline separated list of words, whereas the text to be corrected has to be a whitespace separated file of words."
+  putStrLn "MODE has to be one of the following modi:"
+  putStrLn "  --findWithin Gives correction proposals for a given distance. args contains a single word and a distance (int)"
+  putStrLn "               Example: knuspell --minEdit dict foo 3"
+  putStrLn "  --findBest   Lists the n nearest proposals to a given word. args contains a single word and the number of proposals"
+  putStrLn "               Example: knuspell --findWithin dict foo 3"
+  putStrLn "  --corrText   Corrects a given text in an interactive operating mode. args contains the name \"filename\" of a text file"
+  putStrLn "               containing words to check. The changes made will be written \"corrected_filename\""
+  putStrLn "               Example: knuspell --dumbCorr dict text"
+  putStrLn "  --dumbCorr   Corrects a given text by substituting every word with its nearest neighbour in the dictionary."
+  putStrLn "               Example: knuspell --dumbCorr dict text"
   putStrLn ""
-  putStrLn "  --help      Shows this text. Ba dum tish."
+  putStrLn "  --help       Shows this text. Ba dum tish."
   putStrLn ""
 
