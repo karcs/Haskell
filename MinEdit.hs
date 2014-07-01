@@ -7,14 +7,56 @@ import Trie
 import Control.Monad.State
 import qualified Data.Map as M
 import Data.Maybe (maybe)
-import Data.List (insertBy, partition)
+import Data.List (insertBy, partition, minimumBy)
 import Debug.Trace
 
 type CharInts = [(Char, Int)]
 type StateEntry = ([(Char,CharInts)], String, Trie)
 type StateEntries = M.Map Int [StateEntry]
 
+type Cost = Int
+data Edit = Edit {
+  function :: String -> (String, Cost),
+  arity :: Int
+  }
 
+edit :: Edit -> String -> (String, Cost)
+edit e s = (s' ++ g, cst) 
+  where (f, g) = splitAt (arity e) s  -- f takes postfix and transforms it (string is in reverse order); returns new postfix and costs
+        (s', cst) = function e f  
+
+delete :: Edit
+delete = Edit f 1
+    where f [_] = ([], 1)
+          f s = (s, 0)
+          
+
+insert :: Char -> Edit
+insert c = Edit f 0
+    where f [] = ([c], 1)
+          f s = (s, 0)
+
+substitute :: Char -> Edit
+substitute c = Edit f 1
+    where f [c'] = ([c], cst)
+              where cst = if c == c'
+                          then 0
+                          else 1
+          f s = (s,0)
+
+swap :: Edit
+swap = Edit f 2
+    where f [c,c'] = ([c',c], cst)
+              where cst = if c == c'
+                          then 0
+                          else 1
+          f s = (s,0)
+
+minEdit :: String -> [Edit] -> (String, Cost)
+minEdit s es = minimumBy o (map g es)
+                    where g = (\e -> function e s) 
+                          o = (\a b -> compare (snd a) (snd b)) -- select minimum by the least costs
+                                  
 bigNum :: Int
 bigNum = 9999
 
