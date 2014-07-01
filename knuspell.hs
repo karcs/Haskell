@@ -15,7 +15,6 @@ main :: IO()
 main = do
   args <- getArgs
   case args of
-    []                         -> help
     "--help" : _ -> help        -- Print help.
     "--findWithin" : args' -> if l == 3 then
                                 findWithin    -- Gives correction proposals within a given distance.
@@ -42,7 +41,7 @@ main = do
                             else
                                 errorWrongNumberOfArguments 2 l
                                 where l = length args'
-    _ -> error "Sorry, I do not understand."
+    _ -> help
 
 -- | Gives correction proposals within a given distance. 
 findWithin :: IO()
@@ -52,11 +51,11 @@ findWithin = do
   let rad = read (args !! 3) :: Int
       word = args !! 2
       props = findNeighbourhood rad word (makeTrie $ lines dict)
-  showProp props
+  showProposals props
 
 -- | Shows proposals
-showProp :: M.Map Int [String] -> IO ()
-showProp = M.foldlWithKey f (return ())
+showProposals :: M.Map Int [String] -> IO ()
+showProposals = M.foldlWithKey f (return ())
     where f a k b = do
             a
             if k == 0 then
@@ -77,7 +76,7 @@ findbest = do
       idx = read (args !! 3) :: Int
       trie = makeTrie $ lines dict
       props = foldr (uncurry $ M.insertWith (++)) M.empty $ map (\(a,b) -> (a,[b])) $ findBest idx word trie
-  showProp props
+  showProposals props
 
 -- | Corrects the given file "text" and writes in "corrected_text" all changes made.
 correctText :: IO ()
@@ -180,7 +179,5 @@ help = do
   putStrLn "               Example: knuspell --dumbCorr dict text"
   putStrLn "  --dumbCorr   Corrects a given text by substituting every word with its nearest neighbour in the dictionary."
   putStrLn "               Example: knuspell --dumbCorr dict text"
-  putStrLn ""
-  putStrLn "  --help       Shows this text. Ba dum tish."
-  putStrLn ""
+  putStrLn "  --help       Shows this text."
 
