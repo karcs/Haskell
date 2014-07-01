@@ -31,8 +31,20 @@ findWithin = do
   file <- readFile (args!!1)
   let rad = read (args !! 3) :: Int
       word = args !! 2
-  putStrLn $ show $ findNeighbourhood rad word (makeTrie $ lines file)
+      props = findNeighbourhood rad word (makeTrie $ lines file)
+  showProp props
 
+-- | Shows proposals
+showProp :: M.Map Int [String] -> IO ()
+showProp = M.foldlWithKey f (return ())
+    where f a k b = do
+            a
+            putStrLn $ "Words with minimum edit distance " ++ show k ++ " are the following:"
+            foldl g (return ()) b 
+                where g c d = do
+                        c
+                        putStrLn d
+                  
 -- | Gives the n nearst proposals to a given word.
 findbest :: IO()
 findbest = do
@@ -65,19 +77,23 @@ correctText = do
                   setSGR [SetColor Foreground Vivid Blue]
                   putStr $ (++) w " "
                   setSGR [SetColor Foreground Vivid White]
-                  putStr $ intercalate " "  $ take 10 ws
+                  putStr $ intercalate " "  $ take 20 ws
                   putStrLn ""
-                  let prop = findBest 5 w t
+                  let prop = (0,w ++ " (leave uncorrected)") : (take 10 $ zip [1..] (M.foldl (++) [] (findNeighbourhood ((length w) `div` 3) w t))) -- findBest 5 w t
                   setSGR [SetColor Foreground Vivid White]
                   putStr $ concat $ snd $ mapAccumL 
                      (\acc x -> (acc + 1, (show acc) ++ ": " ++ snd x ++ " ")) 1 $ prop
                   putStrLn ""
                   c <- getChar
-                  if ord c >= 49 && ord c < 49 + length prop
+                  let idx = ord c - 49
+                  if idx > 0 && idx < length prop -- first entry of proposals 'prop' does not change anything
                   then do
                     a <- correctWords ws t
-                    return $ (++) (' ' : (snd (prop !! (ord c - 49)))) $ a
-                  else correctWords (w:ws) t
+                    return $ (++) (' ' : (snd (prop !! idx))) $ a
+                  else if idx == 0 then do
+                           a <- correctWords ws t
+                           return $ (++) (' ' : w) $ a
+                       else correctWords (w:ws) t
                 else do
                     a <- correctWords ws t
                     return (' ' : w ++ a)
@@ -117,17 +133,18 @@ showWrong = do
 help :: IO ()
 help = do
   putStrLn ""
-  putStrLn "knuspell MODE dict [args]"
+  putStrLn "knuspell <mode> <dict> <args>"
   putStrLn ""
-  putStrLn "where MODE is one of the following and \"dict\" is the filename of dictionary to use. The dictionary has to be"
-  putStrLn "a newline separated list of words, whereas the text to be corrected has to be a whitespace separated file of words."
-  putStrLn "MODE has to be one of the following modi:"
-  putStrLn "  --findWithin Gives correction proposals for a given distance. args contains a single word and a distance (int)"
-  putStrLn "               Example: knuspell --minEdit dict foo 3"
+  putStrLn "where <mode> is one of the modi described below, <dict> is the filename of dictionary and <args> is a space-separated"
+  putStrLn "list of arguments. The dictionary has to be a newline separated list of words, whereas the text to be corrected has to"
+  putStrLn "be a whitespace separated file of words."
+  putStrLn "<mode> has to be one of the following modi:"
+  putStrLn "  --findWithin Gives correction proposals for a given distance. <args> contains a single word and a distance"
+  putStrLn "               Example: knuspell --findWithin dict.txt foo 3"
   putStrLn "  --findBest   Lists the n nearest proposals to a given word. args contains a single word and the number of proposals"
-  putStrLn "               Example: knuspell --findWithin dict foo 3"
-  putStrLn "  --corrText   Corrects a given text in an interactive operating mode. args contains the name \"filename\" of a text file"
-  putStrLn "               containing words to check. The changes made will be written \"corrected_filename\""
+  putStrLn "               Example: knuspell --findBest dict.txt foo 3"
+  putStrLn "  --corrText   Corrects a given text in an interactive operating mode. <args> contains the name <filename> of a text file"
+  putStrLn "               containing words to check. The changes made will be written corrected_$<filename>"
   putStrLn "               Example: knuspell --dumbCorr dict text"
   putStrLn "  --dumbCorr   Corrects a given text by substituting every word with its nearest neighbour in the dictionary."
   putStrLn "               Example: knuspell --dumbCorr dict text"
