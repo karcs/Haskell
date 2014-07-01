@@ -15,23 +15,43 @@ main :: IO()
 main = do
   args <- getArgs
   case args of
-    ["--findWithin" , _, _, _] -> findWithin  -- Gives correction proposals within a given distance. 
-    ["--findBest"   , _, _, _] -> findbest    -- Gives the n nearst proposals to a given word.
-    ["--help"                ] -> help        -- Print help.
-    ["--corrText"   , _, _   ] -> correctText -- Corrects the given file "text" and writes in "corrected_text" all changes made.
-    ["--dumbCorr"   , _, _   ] -> dumbCorr    -- Corrects the given file "text" by choosing the best proposal.
-    ["--showWrong"  , _, _   ] -> showWrong   -- Shows all words not contained in the dictionary.
+    []                         -> help
+    "--help" : _ -> help        -- Print help.
+    "--findWithin" : args' -> if l == 3 then
+                                findWithin    -- Gives correction proposals within a given distance.
+                            else
+                                errorWrongNumberOfArguments 3 l
+                                where l = length args'
+    "--findBest" : args' -> if l == 3 then
+                                findbest      -- Gives correction proposals within a given distance.
+                            else
+                                errorWrongNumberOfArguments 3 l
+                                where l = length args'
+    "--corrText" : args' -> if l == 2 then
+                                correctText -- Corrects the given file "text" and writes in "corrected_text" all changes made.
+                            else
+                                errorWrongNumberOfArguments 2 l
+                                where l = length args'
+    "--dumbCorr" : args' -> if l == 2 then
+                                dumbCorr    -- Corrects the given file "text" by choosing the best proposal.
+                            else
+                                errorWrongNumberOfArguments 2 l
+                                where l = length args'
+    "--showWrong" : args' -> if l == 2 then
+                                      showWrong   -- Shows all words not contained in the dictionary.proposal.
+                            else
+                                errorWrongNumberOfArguments 2 l
+                                where l = length args'
     _ -> error "Sorry, I do not understand."
-
 
 -- | Gives correction proposals within a given distance. 
 findWithin :: IO()
 findWithin = do
   args <- getArgs
-  file <- readFile (args!!1)
+  dict <- readFile (args!!1)
   let rad = read (args !! 3) :: Int
       word = args !! 2
-      props = findNeighbourhood rad word (makeTrie $ lines file)
+      props = findNeighbourhood rad word (makeTrie $ lines dict)
   showProp props
 
 -- | Shows proposals
@@ -39,7 +59,10 @@ showProp :: M.Map Int [String] -> IO ()
 showProp = M.foldlWithKey f (return ())
     where f a k b = do
             a
-            putStrLn $ "Words with minimum edit distance " ++ show k ++ " are the following:"
+            if k == 0 then
+                putStrLn $ "Congratulations. This word is in our dictionary."
+            else
+                putStrLn $ "Words with minimum edit distance " ++ show k ++ " are the following:"
             foldl g (return ()) b 
                 where g c d = do
                         c
@@ -50,8 +73,11 @@ findbest :: IO()
 findbest = do
   args <- getArgs
   dict <- readFile (args !! 1)
-  let s = args !! 2
-  putStrLn $ show $ findBest (read (args !! 3) :: Int) s (makeTrie $ lines dict)
+  let word = args !! 2
+      idx = read (args !! 3) :: Int
+      trie = makeTrie $ lines dict
+      props = foldr (uncurry $ M.insertWith (++)) M.empty $ map (\(a,b) -> (a,[b])) $ findBest idx word trie
+  showProp props
 
 -- | Corrects the given file "text" and writes in "corrected_text" all changes made.
 correctText :: IO ()
@@ -129,6 +155,12 @@ showWrong = do
       wrongWords (w: ws) t = (if M.null $ findNeighbourhood 2 w t
                               then ' ' : w  
                               else "") ++ (wrongWords ws t)
+
+-- | Wrong number of arguments
+errorWrongNumberOfArguments :: Int -> Int -> IO ()
+errorWrongNumberOfArguments a b =
+  error $ "Wrong number of arguments. The number of expected arguments was " ++ show a ++ " but you entered " ++ show b ++ "."
+                             
 -- | Print help.
 help :: IO ()
 help = do
