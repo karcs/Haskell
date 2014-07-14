@@ -12,11 +12,13 @@ import qualified Data.Map as M
 
 -- | A column in the matrix for evaluating the minimum edit distance. First entry is the current character,
 -- second is the column itself.
-type DistanceMatrixColumn = (Char, [(Char, Int)])
+type DistanceColumn = (Char, [(Char, Int)])
+type Cost = Int
 
+    
 -- | A type representing the current evaluation of a node in a trie. It has the most recent columns of the
 -- minimum edit distance matrix, the characters determining the path to the node and the subtrie.
-type StateEntry = ([DistanceMatrixColumn], String, Trie)
+type StateEntry = ([DistanceColumn], String, Trie)
 
 -- | A map of state entries. Each state entry is to be indexed by some heuristic value.
 type StateEntries = M.Map Int [StateEntry]
@@ -49,7 +51,7 @@ swapcost (c0,c1) (d0,d1) = if c0 == d1 && d0 == c1 && c0 /= '#' && c1 /= '#' && 
 -- Expects the character determing the new column and the current list of columns and returns the updated list and
 -- an heuristic value for the minimum edit distance, which can be used to prune the trie. @#@ is a character denoting
 -- the begin of the string.
-update :: Char -> [DistanceMatrixColumn] -> (Int, [DistanceMatrixColumn])
+update :: Char -> [DistanceColumn] -> (Int, [DistanceColumn])
 update c0 ccis0 = case ccis0 of
   cci0 : cci1 : _ -> (h0, take 2 ((c0, cis0):ccis0)) -- only the first two tables need to be memoized
     where (h0, cis0) = go (0, 0, '#') (0 : 0 : map snd (snd cci1)) (0, snd cci0)
@@ -79,20 +81,20 @@ update c0 ccis0 = case ccis0 of
               go _ (h1,[]) = (h1,[])
 
 -- | Initializes the first column from the original string. It adds the start character @#@ in front of it.
-initializeDistanceMatrixColumn :: String -> [DistanceMatrixColumn]
-initializeDistanceMatrixColumn s = [('#',(zip ('#' : s) [0..]))]
+initializeDistanceColumn :: String -> [DistanceColumn]
+initializeDistanceColumn s = [('#',(zip ('#' : s) [0..]))]
 
 
 -- | @findNeighbourhood i s t@ determines all words in the trie @t@, which have a minimum edit distance to @s@ which is smaller then @t@.
 -- It prunes all subtries, whose heuristic distance as given by the update function is lower then @t@.
 findNeighbourhood :: Int -> String -> Trie -> M.Map Int [String]
-findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 $ initializeDistanceMatrixColumn s0
+findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 $ initializeDistanceColumn s0
   where
     -- first : radius,
     -- second : current string,
     -- third : subtrie
     -- forth : assoc list with substrings (chars) and min edt dists
-    findNeighbourhood' :: Int -> String -> Trie -> [DistanceMatrixColumn] -> M.Map Int [String]
+    findNeighbourhood' :: Int -> String -> Trie -> [DistanceColumn] -> M.Map Int [String]
     findNeighbourhood' r1 s1 (Node m0) ci0 = M.foldr' (M.unionWith (++)) M.empty (M.mapWithKey go m0)
       where
         go :: Char -> Trie -> M.Map Int [String] -- recursion function
@@ -105,7 +107,39 @@ findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 $ initializeDistanceMat
                      M.empty
                    else
                       findNeighbourhood' r1 (s1++[c0]) t1 ci1
-          where (h0,ci1) = update c0 ci0 -- updated assoc list
+                          where (h0,ci1) = update c0 ci0 -- updated assoc list
+
+-- map which maps distances to word lists
+data DistanceMap = DistanceMap {
+      entries :: M.Map Int [String],
+      maxDistance :: Cost
+    }
+
+-- size function for distance map
+size :: DistanceMap -> Int
+size = M.size . entries                          
+
+-- data to be stored as state of the trie
+data TrieState = TrieState {
+      distanceMap :: DistanceMap
+    }
+       
+-- data to be stored in the state of a node
+data NodeState = NodeState {
+      editDistance :: Cost,         -- ^ current edit distance
+      heuristic :: Cost,            -- ^ current heuristic edit distance (lower bound)
+      distances :: [DistanceColumn] -- ^ relevant distance data
+    }
+
+-- first cost is current minimum edit distance, second is current heuristic
+findApprox :: Int -> Int -> String -> Trie -> State TrieState -> State NodeState M.Map Int [String]
+findApprox i r w t = do
+  s <- get
+  if M.size $ snd s < i then
+      
+  else
+      return $ snd s
+
 
 -- | @findBest i s t@ gives @i@ proposals of words of @t@ with the lowest minimum edit distance to @s@.
 -- Internally it uses operates on a list of nodes in the trie and expands the node with the best heuristic as given by update.
@@ -115,7 +149,7 @@ findNeighbourhood r0 s0 t0 = findNeighbourhood' r0 "" t0 $ initializeDistanceMat
 findBest :: Int -> String -> Trie -> [(Int, String)]
 findBest i s t = map (\(i, s) -> (i, reverse $ tail s)) $ reverse result
     where
-      result = evalState findBest' (expand (initializeDistanceMatrixColumn s, "", t), take i $ repeat (bigNum, "_"))
+      result = evalState findBest' (expand (initializeDistanceColumn s, "", t), take i $ repeat (bigNum, "_"))
      
       findBest' :: State (StateEntries, [(Int, String)]) [(Int, String)]
       findBest' = do
